@@ -1,0 +1,4 @@
+{
+  "nav": { "Overview": "Overview", "Compliance": "Compliance", "Operate": "Operate", "Settings": "Settings" },
+  "dashboard": { "welcome": "Welcome back", "subtitle": "Here's your EU AI Act compliance posture at a glance." }
+}

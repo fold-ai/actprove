@@ -1,0 +1,70 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 207 29% 14%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 207 29% 14%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 207 29% 14%;
+
+    /* ActProve navy */
+    --primary: 204 62% 28%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 17% 95%;
+    --secondary-foreground: 204 62% 28%;
+
+    --muted: 210 17% 96%;
+    --muted-foreground: 180 8% 35%;
+
+    --accent: 210 17% 95%;
+    --accent-foreground: 204 62% 28%;
+
+    --destructive: 6 63% 46%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 210 14% 89%;
+    --input: 210 14% 89%;
+    --ring: 204 62% 28%;
+
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 207 29% 10%;
+    --foreground: 0 0% 98%;
+    --card: 207 29% 12%;
+    --card-foreground: 0 0% 98%;
+    --popover: 207 29% 12%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 204 61% 47%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 207 20% 18%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 207 20% 18%;
+    --muted-foreground: 210 10% 65%;
+    --accent: 207 20% 18%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 6 63% 46%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 207 20% 22%;
+    --input: 207 20% 22%;
+    --ring: 204 61% 47%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}

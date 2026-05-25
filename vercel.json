@@ -1,0 +1,15 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/digest",
+      "schedule": "0 9 1 * *"
+    }
+  ],
+  "functions": {
+    "app/api/register/pdf/route.ts": { "maxDuration": 60 },
+    "app/api/documents/[id]/pdf/route.ts": { "maxDuration": 60 },
+    "app/api/v1/register.pdf/route.ts": { "maxDuration": 60 },
+    "app/api/inngest/route.ts": { "maxDuration": 60 },
+    "app/api/cron/digest/route.ts": { "maxDuration": 60 }
+  }
+}

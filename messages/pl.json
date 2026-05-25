@@ -1,0 +1,4 @@
+{
+  "nav": { "Overview": "Przegląd", "Compliance": "Zgodność", "Operate": "Działanie", "Settings": "Ustawienia" },
+  "dashboard": { "welcome": "Witaj ponownie", "subtitle": "Twój stan zgodności z aktem o AI w skrócie." }
+}

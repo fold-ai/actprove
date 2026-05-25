@@ -1,0 +1,837 @@
+// ActProve — EU AI Act Compliance Operations Platform
+// Phase 1 data model. All tenant tables carry organizationId for multi-tenant
+// isolation; Supabase Row-Level Security is layered on top (see prisma/rls.sql).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─────────────────────────── Enums ───────────────────────────
+
+enum Plan {
+  starter
+  growth
+  team
+  enterprise
+}
+
+enum PlanStatus {
+  trialing
+  active
+  past_due
+  cancelled
+  trial_expired
+}
+
+enum OrgRole {
+  provider
+  deployer
+  both
+}
+
+enum UserRole {
+  owner
+  admin
+  member
+  viewer
+}
+
+enum AICategory {
+  crm
+  chatbot
+  hr
+  analytics
+  content
+  code
+  other
+}
+
+enum RiskTier {
+  prohibited
+  high_risk
+  limited_risk
+  minimal_risk
+}
+
+enum SystemStatus {
+  pending
+  compliant
+  needs_action
+  review
+}
+
+enum DocumentType {
+  transparency_notice
+  ai_usage_policy
+  ai_literacy_attestation
+  risk_register
+  fria
+  incident_log
+  vendor_checklist
+  compliance_summary
+}
+
+enum DocumentStatus {
+  draft
+  published
+  outdated
+  archived
+}
+
+enum GeneratedBy {
+  ai
+  manual
+  template
+}
+
+enum Regulation {
+  eu_ai_act
+  nis2
+  dora
+  iso42001
+  gdpr
+  cra
+}
+
+enum Severity {
+  critical
+  high
+  medium
+  info
+}
+
+enum QuestionnaireStatus {
+  draft
+  completed
+  exported
+}
+
+enum LiteracyStatus {
+  pending
+  completed
+  overdue
+}
+
+enum InviteStatus {
+  pending
+  accepted
+  expired
+}
+
+// ───────────────────────── Core tables ─────────────────────────
+
+model Organization {
+  id              String      @id @default(uuid()) @db.Uuid
+  name            String
+  slug            String      @unique
+  domain          String?
+  country         String // ISO 3166-1 alpha-2
+  employeeCount   Int?        @map("employee_count")
+  industry        String?
+  website         String?
+  logoUrl         String?     @map("logo_url")
+  role            OrgRole     @default(deployer)
+  stripeCustomerId String?    @map("stripe_customer_id")
+  plan            Plan        @default(starter)
+  planStatus      PlanStatus  @default(trialing) @map("plan_status")
+  trialEndsAt     DateTime?   @map("trial_ends_at") @db.Timestamptz
+  trustPageSlug   String?     @unique @map("trust_page_slug")
+  trustPageEnabled Boolean    @default(false) @map("trust_page_enabled")
+  trustPageConfig Json?       @map("trust_page_config")
+  trustPageMessage String?    @map("trust_page_message")
+  // ── Phase 2 additions ──
+  parentOrgId     String?     @map("parent_org_id") @db.Uuid // group / subsidiary
+  sector          String? // healthcare | finance | hr | legal | education | ecommerce | public | manufacturing
+  locale          String      @default("en")
+  documentLocale  String      @default("en") @map("document_locale")
+  dateFormat      String      @default("dd MMM yyyy") @map("date_format")
+  brandColor      String?     @map("brand_color")
+  removeBranding  Boolean     @default(false) @map("remove_branding")
+  referredByCode  String?     @map("referred_by_code")
+  benchmarkOptIn  Boolean     @default(true) @map("benchmark_opt_in")
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime    @updatedAt @map("updated_at") @db.Timestamptz
+
+  users                 User[]
+  aiSystems             AiSystem[]
+  documents             ComplianceDocument[]
+  evidenceFiles         EvidenceFile[]
+  questionnaires        QuestionnaireResponse[]
+  auditLogs             AuditLog[]
+  notifications         Notification[]
+  orgRegulationUpdates  OrgRegulationUpdate[]
+  literacyRecords       LiteracyRecord[]
+  invites               TeamInvite[]
+  // ── Phase 2 relations ──
+  parent                Organization?  @relation("OrgGroup", fields: [parentOrgId], references: [id], onDelete: SetNull)
+  subsidiaries          Organization[] @relation("OrgGroup")
+  orgFrameworks         OrgFramework[]
+  orgObligations        OrgObligation[]
+  integrations          Integration[]
+  apiKeys               ApiKey[]
+  webhookEndpoints      WebhookEndpoint[]
+  customRiskRules       CustomRiskRule[]
+  auditSessions         AuditSession[]
+  advisorConversations  AdvisorConversation[]
+  aiIncidents           AiIncident[]
+  supplierAssessments   SupplierAssessment[]
+
+  @@index([parentOrgId])
+  @@map("organizations")
+}
+
+model User {
+  id             String   @id @db.Uuid // matches Supabase auth.users.id
+  organizationId String?  @map("organization_id") @db.Uuid
+  email          String
+  fullName       String?  @map("full_name")
+  role           UserRole @default(member)
+  avatarUrl      String?  @map("avatar_url")
+  jobTitle       String?  @map("job_title")
+  onboarded      Boolean  @default(false)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization     Organization?       @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  systemsCreated   AiSystem[]          @relation("SystemCreatedBy")
+  responsibleFor   AiSystem[]          @relation("SystemResponsible")
+  documentsCreated ComplianceDocument[]
+  evidenceUploaded EvidenceFile[]
+  auditLogs        AuditLog[]
+  notifications    Notification[]
+  literacyRecord   LiteracyRecord?
+
+  @@index([organizationId])
+  @@map("users")
+}
+
+model AiSystem {
+  id                  String      @id @default(uuid()) @db.Uuid
+  organizationId      String      @map("organization_id") @db.Uuid
+  name                String
+  vendor              String?
+  category            AICategory
+  description         String?
+  useCase             String?     @map("use_case")
+  dataProcessed       String[]    @default([]) @map("data_processed")
+  affectsPeople       Boolean     @default(false) @map("affects_people")
+  affectsEmployment   Boolean     @default(false) @map("affects_employment")
+  affectsCredit       Boolean     @default(false) @map("affects_credit")
+  affectsHealthcare   Boolean     @default(false) @map("affects_healthcare")
+  isPublicFacing      Boolean     @default(false) @map("is_public_facing")
+  hasChatbotUi        Boolean     @default(false) @map("has_chatbot_ui")
+  hidesAiNature       Boolean     @default(false) @map("hides_ai_nature")
+  generatesContent    Boolean     @default(false) @map("generates_content")
+  isRealtimeBiometric Boolean     @default(false) @map("is_realtime_biometric")
+  riskTier            RiskTier?   @map("risk_tier")
+  riskRationale       String?     @map("risk_rationale")
+  riskArticles        String[]    @default([]) @map("risk_articles")
+  riskConfidence      Float?      @map("risk_confidence")
+  riskClassifiedBy    GeneratedBy @default(ai) @map("risk_classified_by")
+  status              SystemStatus @default(pending)
+  responsiblePersonId String?     @map("responsible_person_id") @db.Uuid
+  responsiblePerson   String?     @map("responsible_person") // freeform fallback
+  humanOversight      Boolean     @default(false) @map("human_oversight")
+  logRetention        Boolean     @default(false) @map("log_retention")
+  logRetentionMonths  Int?        @map("log_retention_months")
+  vendorCompliant     Boolean?    @map("vendor_compliant")
+  vendorCompliantUrl  String?     @map("vendor_compliant_url")
+  dpaInPlace          String?     @map("dpa_in_place") // yes | no | in_progress
+  dataLocation        String?     @map("data_location") // eu | non_eu | unknown
+  deploymentDate      DateTime?   @map("deployment_date") @db.Date
+  lastReviewedAt      DateTime?   @map("last_reviewed_at") @db.Timestamptz
+  nextReviewDue       DateTime?   @map("next_review_due") @db.Timestamptz
+  notes               String?
+  archived            Boolean     @default(false)
+  // ── Phase 2: discovery / shadow IT ──
+  discoveryStatus     String      @default("confirmed") @map("discovery_status") // confirmed | discovered_not_reviewed | dismissed
+  discoveredVia       String?     @map("discovered_via") // integration type or "csv"
+  internalRiskTier    RiskTier?   @map("internal_risk_tier") // from custom rules
+  internalRiskLabel   String?     @map("internal_risk_label")
+  createdById         String?     @map("created_by") @db.Uuid
+  createdAt           DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime    @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization      Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy         User?                @relation("SystemCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  responsibleUser   User?                @relation("SystemResponsible", fields: [responsiblePersonId], references: [id], onDelete: SetNull)
+  documents         ComplianceDocument[]
+  evidenceFiles     EvidenceFile[]
+  incidents         AiIncident[]
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, riskTier])
+  @@index([organizationId, discoveryStatus])
+  @@map("ai_systems")
+}
+
+model ComplianceDocument {
+  id              String         @id @default(uuid()) @db.Uuid
+  organizationId  String         @map("organization_id") @db.Uuid
+  aiSystemId      String?        @map("ai_system_id") @db.Uuid
+  type            DocumentType
+  title           String
+  contentHtml     String?        @map("content_html")
+  contentMarkdown String?        @map("content_markdown")
+  pdfUrl          String?        @map("pdf_url")
+  version         Int            @default(1)
+  status          DocumentStatus @default(draft)
+  generatedBy     GeneratedBy    @default(ai) @map("generated_by")
+  sourceHash      String?        @map("source_hash") // detects when source data changed
+  lastGeneratedAt DateTime?      @map("last_generated_at") @db.Timestamptz
+  createdById     String?        @map("created_by") @db.Uuid
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  aiSystem     AiSystem?    @relation(fields: [aiSystemId], references: [id], onDelete: SetNull)
+  createdBy    User?        @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  evidenceFiles EvidenceFile[]
+  versions     DocumentVersion[]
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, type])
+  @@map("compliance_documents")
+}
+
+model DocumentVersion {
+  id          String   @id @default(uuid()) @db.Uuid
+  documentId  String   @map("document_id") @db.Uuid
+  version     Int
+  title       String
+  contentHtml String?  @map("content_html")
+  createdById String?  @map("created_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  document ComplianceDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@map("document_versions")
+}
+
+model RegulationUpdate {
+  id              String     @id @default(uuid()) @db.Uuid
+  title           String
+  summary         String
+  fullContent     String?    @map("full_content")
+  sourceUrl       String?    @map("source_url")
+  regulation      Regulation
+  severity        Severity   @default(info)
+  affectsRiskTiers String[]  @default([]) @map("affects_risk_tiers")
+  publishedAt     DateTime   @map("published_at") @db.Timestamptz
+  createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz
+
+  orgLinks OrgRegulationUpdate[]
+
+  @@index([publishedAt])
+  @@map("regulation_updates")
+}
+
+model OrgRegulationUpdate {
+  id                 String   @id @default(uuid()) @db.Uuid
+  organizationId     String   @map("organization_id") @db.Uuid
+  regulationUpdateId String   @map("regulation_update_id") @db.Uuid
+  personalizedText   String?  @map("personalized_text")
+  relevant           Boolean  @default(true)
+  reviewed           Boolean  @default(false)
+  actionTaken        Boolean  @default(false) @map("action_taken")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  regulationUpdate RegulationUpdate @relation(fields: [regulationUpdateId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, regulationUpdateId])
+  @@index([organizationId])
+  @@map("org_regulation_updates")
+}
+
+model EvidenceFile {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  aiSystemId     String?  @map("ai_system_id") @db.Uuid
+  documentId     String?  @map("document_id") @db.Uuid
+  filename       String
+  fileUrl        String   @map("file_url")
+  fileSize       BigInt?  @map("file_size")
+  mimeType       String?  @map("mime_type")
+  label          String?
+  category       String? // vendor_dpa | conformity | training | incident | policy | other
+  obligation     String? // human_oversight | log_retention | ...
+  uploadedById   String?  @map("uploaded_by") @db.Uuid
+  uploadedAt     DateTime @default(now()) @map("uploaded_at") @db.Timestamptz
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  aiSystem     AiSystem?           @relation(fields: [aiSystemId], references: [id], onDelete: SetNull)
+  document     ComplianceDocument? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  uploadedBy   User?               @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@map("evidence_files")
+}
+
+model QuestionnaireResponse {
+  id               String              @id @default(uuid()) @db.Uuid
+  organizationId   String              @map("organization_id") @db.Uuid
+  title            String
+  clientName       String?             @map("client_name")
+  dueDate          DateTime?           @map("due_date") @db.Date
+  rawQuestions     Json                @map("raw_questions")
+  generatedAnswers Json?               @map("generated_answers")
+  status           QuestionnaireStatus @default(draft)
+  createdAt        DateTime            @default(now()) @map("created_at") @db.Timestamptz
+  completedAt      DateTime?           @map("completed_at") @db.Timestamptz
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("questionnaire_responses")
+}
+
+model AuditLog {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  userId         String?  @map("user_id") @db.Uuid
+  action         String
+  resourceType   String?  @map("resource_type")
+  resourceId     String?  @map("resource_id") @db.Uuid
+  metadata       Json?
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([organizationId, createdAt])
+  @@map("audit_log")
+}
+
+model Notification {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  userId         String?  @map("user_id") @db.Uuid
+  type           String
+  title          String
+  body           String?
+  link           String?
+  read           Boolean  @default(false)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([userId, read])
+  @@map("notifications")
+}
+
+model LiteracyRecord {
+  id             String         @id @default(uuid()) @db.Uuid
+  organizationId String         @map("organization_id") @db.Uuid
+  userId         String?        @map("user_id") @db.Uuid @unique
+  name           String
+  email          String
+  jobTitle       String?        @map("job_title")
+  systemsUsed    String[]       @default([]) @map("systems_used")
+  status         LiteracyStatus @default(pending)
+  token          String         @unique @default(uuid())
+  acknowledgedAt DateTime?      @map("acknowledged_at") @db.Timestamptz
+  acknowledgedIp String?        @map("acknowledged_ip")
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@map("literacy_records")
+}
+
+model TeamInvite {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  email          String
+  role           UserRole     @default(member)
+  token          String       @unique @default(uuid())
+  status         InviteStatus @default(pending)
+  invitedById    String?      @map("invited_by") @db.Uuid
+  expiresAt      DateTime     @map("expires_at") @db.Timestamptz
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("team_invites")
+}
+
+// ═══════════════════════ Phase 2 enums ═══════════════════════
+
+enum FrameworkStatus {
+  available
+  active
+  archived
+}
+
+enum ObligationStatus {
+  todo
+  in_progress
+  in_review
+  complete
+  not_applicable
+}
+
+enum ObligationPriority {
+  critical
+  high
+  medium
+  low
+}
+
+enum IntegrationStatus {
+  not_connected
+  connected
+  error
+  pending
+}
+
+enum AdvisorRole {
+  user
+  assistant
+}
+
+enum IncidentSeverity {
+  critical
+  high
+  medium
+  low
+}
+
+enum IncidentStatus {
+  open
+  investigating
+  resolved
+  reported
+}
+
+// ═══════════════════════ Multi-regulation ═══════════════════════
+
+model RegulationFramework {
+  id              String   @id @default(uuid()) @db.Uuid
+  code            String   @unique // eu_ai_act | iso_42001 | nis2 | dora
+  name            String
+  jurisdiction    String?
+  description     String?
+  enforcementDate DateTime? @map("enforcement_date") @db.Date
+  recurring       Boolean  @default(false) // e.g. ISO cert 3-year cycle
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  obligations FrameworkObligation[]
+  orgLinks    OrgFramework[]
+
+  @@map("regulation_frameworks")
+}
+
+model FrameworkObligation {
+  id            String             @id @default(uuid()) @db.Uuid
+  frameworkId   String             @map("framework_id") @db.Uuid
+  code          String // clause / article reference, e.g. "Clause 6.1.2"
+  title         String
+  description   String?
+  appliesTo     String?            @map("applies_to") // all | high_risk | sector:healthcare
+  priority      ObligationPriority @default(medium)
+  estimatedHours Int?              @map("estimated_hours")
+  // Which existing EU AI Act data point pre-fills this (data overlap %).
+  prefillSource String?            @map("prefill_source")
+  sortOrder     Int                @default(0) @map("sort_order")
+
+  framework      RegulationFramework @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
+  orgObligations OrgObligation[]
+
+  @@unique([frameworkId, code])
+  @@index([frameworkId])
+  @@map("framework_obligations")
+}
+
+model OrgFramework {
+  id           String          @id @default(uuid()) @db.Uuid
+  organizationId String        @map("organization_id") @db.Uuid
+  frameworkId  String          @map("framework_id") @db.Uuid
+  status       FrameworkStatus @default(active)
+  activatedAt  DateTime        @default(now()) @map("activated_at") @db.Timestamptz
+  settings     Json?           @map("custom_settings_json")
+  // ISO 42001 certification tracker
+  certBody     String?         @map("cert_body")
+  certNumber   String?         @map("cert_number")
+  certExpiry   DateTime?       @map("cert_expiry") @db.Date
+  nextAudit    DateTime?       @map("next_audit") @db.Date
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  framework    RegulationFramework @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, frameworkId])
+  @@index([organizationId])
+  @@map("org_frameworks")
+}
+
+model OrgObligation {
+  id            String           @id @default(uuid()) @db.Uuid
+  organizationId String          @map("organization_id") @db.Uuid
+  obligationId  String           @map("obligation_id") @db.Uuid
+  status        ObligationStatus @default(todo)
+  assigneeId    String?          @map("assignee_id") @db.Uuid
+  evidenceUrl   String?          @map("evidence_url")
+  dueDate       DateTime?        @map("due_date") @db.Date
+  notes         String?
+  completedAt   DateTime?        @map("completed_at") @db.Timestamptz
+  createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime         @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  obligation   FrameworkObligation @relation(fields: [obligationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, obligationId])
+  @@index([organizationId, status])
+  @@map("org_obligations")
+}
+
+// ═══════════════════════ Integrations ═══════════════════════
+
+model Integration {
+  id            String            @id @default(uuid()) @db.Uuid
+  organizationId String           @map("organization_id") @db.Uuid
+  type          String // azure | github | okta | aws | gcp | hubspot | salesforce | slack | jira | csv
+  status        IntegrationStatus @default(not_connected)
+  credentials   String?           @map("credentials_encrypted") // AES-GCM ciphertext
+  config        Json?             @map("config_json")
+  lastSyncAt    DateTime?         @map("last_sync_at") @db.Timestamptz
+  createdAt     DateTime          @default(now()) @map("created_at") @db.Timestamptz
+
+  organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  syncLogs     IntegrationSyncLog[]
+
+  @@unique([organizationId, type])
+  @@index([organizationId])
+  @@map("integrations")
+}
+
+model IntegrationSyncLog {
+  id            String    @id @default(uuid()) @db.Uuid
+  integrationId String    @map("integration_id") @db.Uuid
+  startedAt     DateTime  @default(now()) @map("started_at") @db.Timestamptz
+  endedAt       DateTime? @map("ended_at") @db.Timestamptz
+  recordsSynced Int       @default(0) @map("records_synced")
+  newCandidates Int       @default(0) @map("new_candidates")
+  status        String    @default("running") // running | success | error
+  errors        Json?     @map("errors_json")
+
+  integration Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@index([integrationId])
+  @@map("integration_sync_logs")
+}
+
+// ═══════════════════════ Public API + webhooks ═══════════════════════
+
+model ApiKey {
+  id            String    @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  name          String
+  keyHash       String    @unique @map("key_hash") // sha256 of token
+  prefix        String // first chars shown in UI, e.g. ap_live_abcd
+  permissions   String    @default("read") // read | read_write
+  lastUsedAt    DateTime? @map("last_used_at") @db.Timestamptz
+  expiresAt     DateTime? @map("expires_at") @db.Timestamptz
+  revoked       Boolean   @default(false)
+  createdById   String?   @map("created_by") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  usageLogs    ApiUsageLog[]
+
+  @@index([organizationId])
+  @@map("api_keys")
+}
+
+model ApiUsageLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  apiKeyId   String   @map("api_key_id") @db.Uuid
+  endpoint   String
+  method     String
+  statusCode Int      @map("status_code")
+  responseMs Int      @map("response_ms")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  apiKey ApiKey @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+
+  @@index([apiKeyId, createdAt])
+  @@map("api_usage_logs")
+}
+
+model WebhookEndpoint {
+  id            String   @id @default(uuid()) @db.Uuid
+  organizationId String  @map("organization_id") @db.Uuid
+  url           String
+  events        String[] @default([]) // system.created | system.risk_changed | ...
+  secret        String   @map("secret_hash") // used to sign payloads (HMAC)
+  active        Boolean  @default(true)
+  lastDeliveredAt DateTime? @map("last_delivered_at") @db.Timestamptz
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  deliveries   WebhookDelivery[]
+
+  @@index([organizationId])
+  @@map("webhook_endpoints")
+}
+
+model WebhookDelivery {
+  id            String   @id @default(uuid()) @db.Uuid
+  webhookId     String   @map("webhook_id") @db.Uuid
+  eventType     String   @map("event_type")
+  payload       Json     @map("payload_json")
+  status        String   @default("pending") // pending | delivered | failed
+  attempts      Int      @default(0)
+  lastAttemptAt DateTime? @map("last_attempt_at") @db.Timestamptz
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  webhook WebhookEndpoint @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId])
+  @@map("webhook_deliveries")
+}
+
+// ═══════════════════════ Partner program ═══════════════════════
+
+model PartnerAccount {
+  id             String   @id @default(uuid()) @db.Uuid
+  name           String
+  email          String   @unique
+  tier           String   @default("referral") // referral | reseller | strategic | technology
+  commissionRate Float    @default(0.2) @map("commission_rate")
+  referralCode   String   @unique @map("referral_code")
+  approved       Boolean  @default(false)
+  totalReferred  Int      @default(0) @map("total_referred")
+  totalEarnings  Float    @default(0) @map("total_earnings")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  referrals PartnerReferral[]
+
+  @@map("partner_accounts")
+}
+
+model PartnerReferral {
+  id              String    @id @default(uuid()) @db.Uuid
+  partnerId       String    @map("partner_id") @db.Uuid
+  referredOrgId   String?   @map("referred_org_id") @db.Uuid
+  status          String    @default("signed_up") // signed_up | converted | churned
+  commissionAmount Float    @default(0) @map("commission_amount")
+  paidAt          DateTime? @map("paid_at") @db.Timestamptz
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  partner PartnerAccount @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@index([partnerId])
+  @@map("partner_referrals")
+}
+
+// ═══════════════════════ Enterprise ═══════════════════════
+
+model CustomRiskRule {
+  id            String   @id @default(uuid()) @db.Uuid
+  organizationId String  @map("organization_id") @db.Uuid
+  name          String
+  condition     Json     @map("condition_json")
+  resultingTier RiskTier @map("resulting_tier")
+  internalLabel String?  @map("internal_label")
+  priority      Int      @default(0)
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("custom_risk_rules")
+}
+
+model AuditSession {
+  id            String    @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  auditorEmail  String    @map("auditor_email")
+  token         String    @unique @default(uuid())
+  active        Boolean   @default(true)
+  startedAt     DateTime  @default(now()) @map("started_at") @db.Timestamptz
+  endedAt       DateTime? @map("ended_at") @db.Timestamptz
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("audit_sessions")
+}
+
+model AdvisorConversation {
+  id            String   @id @default(uuid()) @db.Uuid
+  organizationId String  @map("organization_id") @db.Uuid
+  userId        String?  @map("user_id") @db.Uuid
+  title         String   @default("New conversation")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  messages     AdvisorMessage[]
+
+  @@index([organizationId])
+  @@map("advisor_conversations")
+}
+
+model AdvisorMessage {
+  id             String      @id @default(uuid()) @db.Uuid
+  conversationId String      @map("conversation_id") @db.Uuid
+  role           AdvisorRole
+  content        String
+  citations      Json?       @map("citations_json")
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz
+
+  conversation AdvisorConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@map("advisor_messages")
+}
+
+model AiIncident {
+  id            String           @id @default(uuid()) @db.Uuid
+  organizationId String          @map("organization_id") @db.Uuid
+  aiSystemId    String?          @map("ai_system_id") @db.Uuid
+  title         String
+  description   String?
+  severity      IncidentSeverity @default(medium)
+  status        IncidentStatus   @default(open)
+  reportedAt    DateTime         @default(now()) @map("reported_at") @db.Timestamptz
+  resolvedAt    DateTime?        @map("resolved_at") @db.Timestamptz
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  aiSystem     AiSystem?    @relation(fields: [aiSystemId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@map("ai_incidents")
+}
+
+model SupplierAssessment {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  vendorName     String   @map("vendor_name")
+  assessmentDate DateTime @default(now()) @map("assessment_date") @db.Date
+  score          Int?
+  findings       Json?    @map("findings_json")
+  nextReviewDate DateTime? @map("next_review_date") @db.Date
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("supplier_assessments")
+}

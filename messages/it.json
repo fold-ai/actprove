@@ -1,0 +1,4 @@
+{
+  "nav": { "Overview": "Panoramica", "Compliance": "Conformità", "Operate": "Operatività", "Settings": "Impostazioni" },
+  "dashboard": { "welcome": "Bentornato", "subtitle": "Il tuo stato di conformità al regolamento UE sull'IA in sintesi." }
+}

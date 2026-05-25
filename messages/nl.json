@@ -1,0 +1,4 @@
+{
+  "nav": { "Overview": "Overzicht", "Compliance": "Compliance", "Operate": "Beheer", "Settings": "Instellingen" },
+  "dashboard": { "welcome": "Welkom terug", "subtitle": "Uw EU AI-wet compliance-status in één oogopslag." }
+}
